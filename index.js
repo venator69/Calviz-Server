@@ -138,7 +138,8 @@ app.post('/register', upload.single('profile'), async (req, res) => {
     const hashed = await bcrypt.hash(password, saltRounds);
 
     // Insert ke database, agar tidak terjadi SQL Injection, gunakan parameterized query
-    const profileUrl = `/uploads/${profileFile.filename}`;
+    const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
+
     const query = `
       insert into users(name, email, password, profile)
       values($1, $2, $3, $4) returning id
@@ -149,7 +150,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
     res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl});
   } catch (err) {
     console.error(err);
-    res.status(500).json({ status: 'error', message: 'Database error' });
+    res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
@@ -220,7 +221,7 @@ app.get('/auth/google/callback', passport.authenticate('google', {
     );
 
     // Redirect user back to frontend with token
-    res.redirect(`http://localhost:8000/?token=${token}`);
+    res.redirect(`https://calviz.vercel.app/?token=${token}`);
   }
 );
 
