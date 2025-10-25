@@ -132,42 +132,41 @@ passport.deserializeUser(async (id, done) => {
 // Register endpoint
 app.post('/register', upload.single('profile'), async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-    const profileFile = req.file;
-
-    // Cek apakah name atau email sudah ada
-    const existing = await pool.query(
-      'SELECT * FROM users WHERE email = $1 OR name = $2',
-      [email, name]
-    );
-    if (existing.rows.length > 0) {
-      return res.status(409).json({
-        status: 'error',
-        message: 'Username or email is already registered'
-      });
+    // Pastikan folder uploads ada
+    const uploadDir = path.join(__dirname, 'public', 'uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log('Created uploads folder at', uploadDir);
     }
 
-    // Hash the password
+    console.log("Incoming req.body:", req.body);
+    console.log("Incoming req.file:", req.file);
+
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ status: 'error', message: 'Name, email, and password are required' });
+    }
+
+    // Cek apakah email sudah terdaftar
+    const existing = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ status: 'error', message: 'Email already registered' });
+    }
+
     const hashed = await bcrypt.hash(password, saltRounds);
+    const profileUrl = req.file ? `/uploads/${req.file.filename}` : null;
 
-    // URL profile (jika ada)
-    const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
+    const query = `
+      INSERT INTO users(name, email, password, profile)
+      VALUES($1, $2, $3, $4) RETURNING id
+    `;
+    const values = [name, email, hashed, profileUrl];
+    const result = await pool.query(query, values);
 
-    // Insert ke database
-    const result = await pool.query(
-      `INSERT INTO users(name, email, password, profile)
-       VALUES($1, $2, $3, $4) RETURNING id`,
-      [name, email, hashed, profileUrl]
-    );
-
-    res.status(200).json({
-      status: 'success',
-      userId: result.rows[0].id,
-      imageUrl: profileUrl
-    });
+    res.status(201).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
 
   } catch (err) {
-    console.error('Registration error:', err);
+    console.error("REGISTER ERROR:", err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
