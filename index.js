@@ -134,25 +134,44 @@ app.post('/register', upload.single('profile'), async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const profileFile = req.file;
+
+    // Cek apakah name atau email sudah ada
+    const existing = await pool.query(
+      'SELECT * FROM users WHERE email = $1 OR name = $2',
+      [email, name]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'Username or email is already registered'
+      });
+    }
+
     // Hash the password
     const hashed = await bcrypt.hash(password, saltRounds);
 
-    // Insert ke database, agar tidak terjadi SQL Injection, gunakan parameterized query
+    // URL profile (jika ada)
     const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
 
-    const query = `
-      insert into users(name, email, password, profile)
-      values($1, $2, $3, $4) returning id
-    `;
-    const values = [name, email, hashed, profileUrl];
-    const result = await pool.query(query, values);
+    // Insert ke database
+    const result = await pool.query(
+      `INSERT INTO users(name, email, password, profile)
+       VALUES($1, $2, $3, $4) RETURNING id`,
+      [name, email, hashed, profileUrl]
+    );
 
-    res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl});
+    res.status(200).json({
+      status: 'success',
+      userId: result.rows[0].id,
+      imageUrl: profileUrl
+    });
+
   } catch (err) {
-    console.error(err);
+    console.error('Registration error:', err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
+
 
 // login endpoint
 app.post('/login', upload.none(), async (req, res) => {
