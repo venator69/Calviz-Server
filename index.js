@@ -138,7 +138,7 @@ async function submitform(name, password, email, file) {
   formData.append('profile', file);
 
   try {
-    const response = await fetch('https://calviz-server-production.up.railway.app/register', {
+    const response = await fetch('http://calviz-server-production.up.railway.app/register', {
       method: "POST",
       body: formData
     });
