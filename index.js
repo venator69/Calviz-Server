@@ -15,6 +15,11 @@ const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const saltRounds = 10;
 const app = express();
 
+const uploadFolder = 'public/uploads';
+if (!fs.existsSync(uploadFolder)) {
+  fs.mkdirSync(uploadFolder, { recursive: true });
+}
+
 app.use('/uploads', express.static('public/uploads'));
 
 
@@ -90,8 +95,19 @@ pool.query('SELECT NOW()', (err, res) => {
 /*--------------------
       Endpoints
 ----------------------*/
+// Mengambil data profile user
+app.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT name, profile FROM users WHERE id=$1', [req.user.id]);
+    if (result.rows.length === 0) return res.status(404).json({ message: "User not found" });
+    res.json({ name: result.rows[0].name, profile_picture: result.rows[0].profile });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
-// passport for google Oauth
+// passport untuk google Oauth
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
