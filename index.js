@@ -29,16 +29,11 @@ app.use(cors({
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  exposedHeaders: ["set-cookie"], 
-}));
-
-app.options("*", cors({
-  origin: ["https://calviz.vercel.app"],
-  credentials: true
+  exposedHeaders: ["set-cookie"],
 }));
 
 /* --------------------------------
-   📁 FILE UPLOAD SETUP
+  📁 FILE UPLOAD SETUP
 ---------------------------------- */
 const uploadFolder = 'public/uploads';
 if (!fs.existsSync(uploadFolder)) fs.mkdirSync(uploadFolder, { recursive: true });
