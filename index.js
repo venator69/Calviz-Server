@@ -15,6 +15,7 @@ const jwt = require('jsonwebtoken');
 
 const saltRounds = 10;
 const app = express();
+app.set('trust proxy', 1);
 
 // Upload folder
 const uploadFolder = 'public/uploads';
@@ -159,13 +160,14 @@ app.post('/login', upload.none(), async (req, res) => {
     );
 
     // Kirim token sebagai cookie
-    res.cookie("token", token, {
+    res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "None",
-      maxAge: 24 * 60 * 60 * 1000
+      secure: true,        
+      sameSite: 'None',      // agar bisa diakses lintas domain
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
-
+    
+    console.log("Cookie set successfully:", res.getHeaders()['set-cookie']);
     res.json({ status: "success", message: "Login successful" });
   } catch (err) {
     console.error("Login error:", err);
@@ -222,12 +224,14 @@ app.get('/auth/google/callback',
     );
 
     // Kirim token ke browser sebagai cookie
-    res.cookie("token", token, {
+    res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "None",
-      maxAge: 24 * 60 * 60 * 1000
+      secure: true,          // wajib untuk vercel/https
+      sameSite: 'None',      // agar bisa diakses lintas domain
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
+    res.json({ message: "Login successful" });
+
 
     // Redirect kembali ke frontend tanpa token di URL
     res.redirect("https://calviz.vercel.app/");
