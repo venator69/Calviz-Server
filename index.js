@@ -144,7 +144,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 app.post("/login", upload.none(), async (req, res)=> {
   const { name, password } = req.body;
   try {
-    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const result = await pool.query("SELECT * FROM users WHERE name = $1", [name]);
     const user = result.rows[0];
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
