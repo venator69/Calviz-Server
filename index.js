@@ -3,33 +3,57 @@ const bcrypt = require('bcrypt');
 const multer = require('multer');
 const fs = require('fs');
 const express = require('express');
-const cookieParser = require('cookie-parser');
+const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
 const { Pool } = require('pg');
 const dotenv = require('dotenv');
 const passport = require('passport');
 const { Strategy: GoogleStrategy } = require('passport-google-oauth20');
-const jwt = require('jsonwebtoken');
 
 dotenv.config({ path: './.env' });
-
 const saltRounds = 10;
 const app = express();
 
 /* --------------------------------
    🔧 BASIC SERVER SETUP
 ---------------------------------- */
-app.set('trust proxy', 1); 
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
-// ✅ CORS setup for frontend <-> backend cookies
+// ✅ CORS setup
 app.use(cors({
   origin: ["https://calviz.vercel.app"],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  exposedHeaders: ["set-cookie"], 
+}));
+
+/* --------------------------------
+   🗄️ DATABASE CONNECTION
+---------------------------------- */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) console.error('❌ Database connection failed:', err);
+  else console.log('✅ PostgreSQL connected at', res.rows[0].now);
+});
+
+/* --------------------------------
+   🔐 SESSION SETUP
+---------------------------------- */
+app.use(session({
+  store: new PgSession({ pool: pool, tableName: 'session' }),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24*60*60*1000,
+    secure: true,       // HTTPS wajib
+    sameSite: 'none',   // cross-site
+  },
+  proxy: true,          // penting untuk Railway/Vercel
 }));
 
 /* --------------------------------
@@ -50,58 +74,34 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /* --------------------------------
-   🗄️ DATABASE CONNECTION
----------------------------------- */
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) console.error('❌ Database connection failed:', err);
-  else console.log('✅ PostgreSQL connected at', res.rows[0].now);
-});
-
-/* --------------------------------
-   🔐 JWT AUTH MIDDLEWARE
----------------------------------- */
-function authenticateToken(req, res, next) {
-  console.log("🧩 Incoming cookies:", req.cookies);
-  const token = req.cookies.token;
-  if (!token) return res.status(401).json({ message: 'No token found' });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-}
-
-/* --------------------------------
    👤 USER PROFILE
 ---------------------------------- */
-app.get('/profile', authenticateToken, async (req, res) => {
-  try {
+function authenticateSession(req, res, next){
+  if(!req.session.user) return res.status(401).json({ message: 'Unauthorized' });
+  req.user = req.session.user;
+  next();
+}
+
+app.get('/profile', authenticateSession, async (req, res) => {
+  try{
     const result = await pool.query(
       'SELECT name, profile FROM users WHERE id = $1',
       [req.user.id]
     );
-
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: "User not found" });
+    if(result.rows.length === 0) return res.status(404).json({ message: 'User not found' });
 
     res.json({
       name: result.rows[0].name,
       profile_picture: result.rows[0].profile || '/uploads/default.jpg',
     });
-  } catch (err) {
+  } catch(err){
     console.error('Profile error:', err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
 /* --------------------------------
-  REGISTER
+   REGISTER
 ---------------------------------- */
 app.post('/register', upload.single('profile'), async (req, res) => {
   try {
@@ -114,75 +114,38 @@ app.post('/register', upload.single('profile'), async (req, res) => {
       [name, email, hashed, profileUrl]
     );
 
-    res.status(200).json({
-      status: 'success',
-      userId: result.rows[0].id,
-      imageUrl: profileUrl,
-    });
-  } catch (err) {
+    res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
+  } catch(err){
     console.error("REGISTER ERROR:", err);
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
 
 /* --------------------------------
-    LOGIN
+   LOGIN
 ---------------------------------- */
 app.post("/login", async (req, res) => {
-  // Pastikan req.body ada
   const { name, password } = req.body || {};
-
-  // Cek jika name atau password kosong
-  if (!name || !password) {
-    return res.status(400).json({ message: "Name dan password wajib diisi" });
-  }
+  if(!name || !password) return res.status(400).json({ message: "Name dan password wajib diisi" });
 
   try {
-    // Cari user berdasarkan name (bukan email)
     const result = await pool.query("SELECT * FROM users WHERE name = $1", [name]);
-    if (result.rows.length === 0) {
-      return res.status(400).json({ message: "User tidak ditemukan" });
-    }
+    if(result.rows.length === 0) return res.status(400).json({ message: "User tidak ditemukan" });
 
     const user = result.rows[0];
-
-    // Cek password
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Password salah" });
-    }
+    if(!isMatch) return res.status(400).json({ message: "Password salah" });
 
-    // Generate JWT
-    const token = jwt.sign(
-      { id: user.id, name: user.name },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" }
-    );
-
-    // Kirim cookie ke frontend
-    res.cookie("token", token, {
-      httpOnly: false,
-      secure: true,
-      sameSite: "None",
-      path: "/",
-      maxAge: 24 * 60 * 60 * 1000, // 1 hari
-    });
-
-    res.status(200).json({
-      message: "Login sukses",
-      user: { id: user.id, name: user.name },
-      token,
-    });
-
-  } catch (error) {
-    console.error("❌ Login error:", error);
+    req.session.user = { id: user.id, name: user.name }; // simpan session
+    res.status(200).json({ message: "Login sukses", user: { id: user.id, name: user.name } });
+  } catch(err){
+    console.error("❌ Login error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-
 /* --------------------------------
-     GOOGLE OAUTH
+   GOOGLE OAUTH (Session-based)
 ---------------------------------- */
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
@@ -194,7 +157,7 @@ passport.use(new GoogleStrategy({
     const name = profile.displayName;
 
     let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
-    if (!user) {
+    if(!user){
       const insert = await pool.query(
         'INSERT INTO users (name, email, password, profile) VALUES ($1, $2, $3, $4) RETURNING *',
         [name, email, null, null]
@@ -202,7 +165,7 @@ passport.use(new GoogleStrategy({
       user = insert.rows[0];
     }
     return done(null, user);
-  } catch (err) {
+  } catch(err){
     console.error('OAuth error:', err);
     done(err, null);
   }
@@ -213,39 +176,25 @@ app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'em
 app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
   (req, res) => {
-    const token = jwt.sign(
-      { id: req.user.id, name: req.user.name, email: req.user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      maxAge: 24 * 60 * 60 * 1000,
-      path: '/',
-    });
-
+    // simpan session
+    req.session.user = { id: req.user.id, name: req.user.name, email: req.user.email };
     res.redirect('https://calviz.vercel.app/');
   }
 );
 
 /* --------------------------------
-   🚪 LOGOUT
+   LOGOUT
 ---------------------------------- */
 app.post('/logout', (req, res) => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'None',
-    path: '/',
+  req.session.destroy(err => {
+    if(err) return res.status(500).json({ message: "Logout error" });
+    res.clearCookie('connect.sid', { path: '/', secure: true, sameSite: 'none' });
+    res.json({ message: 'Logged out' });
   });
-  res.json({ message: 'Logged out' });
 });
 
 /* --------------------------------
-   🚀 START SERVER
+   START SERVER
 ---------------------------------- */
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`✅ Server running on port ${port}`));
