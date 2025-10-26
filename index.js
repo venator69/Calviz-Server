@@ -141,8 +141,8 @@ app.post('/register', upload.single('profile'), async (req, res) => {
    LOGIN (manual)
 ----------------------*/
 // login endpoint
-app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+app.post("/login", upload.none(), async (req, res)=> {
+  const { name, password } = req.body;
   try {
     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
     const user = result.rows[0];
@@ -157,15 +157,14 @@ app.post("/login", async (req, res) => {
       { expiresIn: "1d" }
     );
 
-    // Cookie setup for Vercel ↔ Railway
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None",
-      path: "/",
-      domain: ".railway.app", // penting agar cookie lintas domain
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+    // Cookie setup for Vercel Railway
+res.cookie("token", token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "None",
+    path: "/",
+    maxAge: 24 * 60 * 60 * 1000,
+  });
 
     console.log("Cookie set:", res.getHeaders()["set-cookie"]);
     return res.json({ status: "success", message: "Login successful" });
