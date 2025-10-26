@@ -139,37 +139,40 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 /*--------------------
    LOGIN (manual)
 ----------------------*/
+// login endpoint
 app.post('/login', upload.none(), async (req, res) => {
   try {
     const { name, password } = req.body;
-    const result = await pool.query('SELECT * FROM users WHERE name = $1', [name]);
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: 'User not found' });
+    const result = await pool.query("SELECT * FROM users WHERE name = $1", [name]);
 
-    const user = result.rows[0];
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ message: 'Incorrect password' });
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: "User not found" });
+
+    const match = await bcrypt.compare(password, result.rows[0].password);
+    if (!match)
+      return res.status(401).json({ message: "Incorrect password" });
 
     const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email },
+      { id: result.rows[0].id, name: result.rows[0].name, email: result.rows[0].email },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: "24h" }
     );
 
-    // Set token via cookie
+    // Kirim token sebagai cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
-      sameSite: "none",
+      sameSite: "None",
       maxAge: 24 * 60 * 60 * 1000
     });
 
-    res.json({ message: "Login successful" });
+    res.json({ status: "success", message: "Login successful" });
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error("Login error:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
+
 
 /*--------------------
   GOOGLE OAUTH
@@ -215,21 +218,22 @@ app.get('/auth/google/callback',
     const token = jwt.sign(
       { id: req.user.id, name: req.user.name, email: req.user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: "24h" }
     );
 
-    //  Set cookie for Google login too
+    // Kirim token ke browser sebagai cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
-      sameSite: "none",
+      sameSite: "None",
       maxAge: 24 * 60 * 60 * 1000
     });
 
-    // Redirect user back to main page
-    res.redirect("https://calviz.vercel.app/index.html");
+    // Redirect kembali ke frontend tanpa token di URL
+    res.redirect("https://calviz.vercel.app/");
   }
 );
+
 
 /*--------------------
    LOGOUT
