@@ -141,37 +141,37 @@ app.post('/register', upload.single('profile'), async (req, res) => {
    LOGIN (manual)
 ----------------------*/
 // login endpoint
-app.post('/login', upload.none(), async (req, res) => {
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
   try {
-    const { name, password } = req.body;
-    const result = await pool.query("SELECT * FROM users WHERE name = $1", [name]);
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const user = result.rows[0];
 
-    if (result.rows.length === 0)
-      return res.status(404).json({ message: "User not found" });
-
-    const match = await bcrypt.compare(password, result.rows[0].password);
-    if (!match)
-      return res.status(401).json({ message: "Incorrect password" });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     const token = jwt.sign(
-      { id: result.rows[0].id, name: result.rows[0].name, email: result.rows[0].email },
+      { id: user.id, name: user.name, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: "1d" }
     );
 
-    // Kirim token sebagai cookie
-    res.cookie('token', token, {
+    // Cookie setup for Vercel ↔ Railway
+    res.cookie("token", token, {
       httpOnly: true,
-      secure: true,        
-      sameSite: 'None',      // agar bisa diakses lintas domain
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+      secure: true,
+      sameSite: "None",
+      path: "/",
+      domain: ".railway.app", // penting agar cookie lintas domain
+      maxAge: 24 * 60 * 60 * 1000,
     });
-    
-    console.log("Cookie set successfully:", res.getHeaders()['set-cookie']);
-    res.json({ status: "success", message: "Login successful" });
+
+    console.log("Cookie set:", res.getHeaders()["set-cookie"]);
+    return res.json({ status: "success", message: "Login successful" });
   } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Internal server error" });
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -226,10 +226,13 @@ app.get('/auth/google/callback',
     // Kirim token ke browser sebagai cookie
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,          // wajib untuk vercel/https
-      sameSite: 'None',      // agar bisa diakses lintas domain
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+      secure: true,
+      sameSite: 'None',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/',
+      domain: '.railway.app', // ⬅️ tambahkan ini
     });
+
     res.json({ message: "Login successful" });
 
 
