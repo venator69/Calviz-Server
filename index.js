@@ -18,15 +18,23 @@ const app = express();
 /* --------------------------------
    🔧 BASIC SERVER SETUP
 ---------------------------------- */
-app.set('trust proxy', 1); // Needed for secure cookies behind proxy (Railway)
+app.set('trust proxy', 1); 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // ✅ CORS setup for frontend <-> backend cookies
 app.use(cors({
-  origin: "https://calviz.vercel.app",
+  origin: ["https://calviz.vercel.app"],
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["set-cookie"], 
+}));
+
+app.options("*", cors({
+  origin: ["https://calviz.vercel.app"],
+  credentials: true
 }));
 
 /* --------------------------------
@@ -125,35 +133,49 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 /* --------------------------------
     LOGIN
 ---------------------------------- */
-app.post('/login', upload.none(), async (req, res) => {
-  const { name, password } = req.body;
+// ✅ Login endpoint
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+
   try {
-    const result = await pool.query('SELECT * FROM users WHERE name = $1', [name]);
+    const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: "User not found" });
+    }
+
     const user = result.rows[0];
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid password" });
+    }
 
-    if (!user || !(await bcrypt.compare(password, user.password)))
-      return res.status(401).json({ error: 'Invalid credentials' });
-
+    // ✅ Generate JWT
     const token = jwt.sign(
       { id: user.id, name: user.name, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: "1d" }
     );
 
-    // ✅ Set cookie properly for Railway + Vercel
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'None',
-      path: '/',
-      maxAge: 24 * 60 * 60 * 1000,
+    // ✅ Kirim cookie agar bisa diakses frontend (bukan HttpOnly)
+    res.cookie("token", token, {
+      httpOnly: false,       // ❌ false supaya frontend bisa baca
+      secure: true,          // ✅ wajib true untuk HTTPS (Vercel + Railway)
+      sameSite: "None",      // ✅ penting agar cross-site bisa jalan
+      path: "/",             // ✅ cookie berlaku untuk seluruh domain
+      maxAge: 24 * 60 * 60 * 1000, // 1 hari
     });
 
-    console.log("🍪 Cookie set:", res.getHeaders()['set-cookie']);
-    res.json({ status: 'success', message: 'Login successful' });
-  } catch (err) {
-    console.error("LOGIN ERROR:", err);
-    res.status(500).json({ error: 'Server error' });
+    console.log("🍪 Cookie sent:", token);
+
+    res.status(200).json({
+      message: "Login success",
+      user: { id: user.id, name: user.name, email: user.email },
+      token,
+    });
+
+  } catch (error) {
+    console.error("❌ Login error:", error);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
