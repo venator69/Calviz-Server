@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const multer = require('multer');
 const fs = require('fs');
 const express = require('express');
+const cookieParser = require('cookie-parser');
 const { Pool } = require('pg');
 const dotenv = require('dotenv');
 dotenv.config({ path: './.env' });
@@ -10,57 +11,37 @@ dotenv.config({ path: './.env' });
 const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-
+const jwt = require('jsonwebtoken');
 
 const saltRounds = 10;
 const app = express();
 
+// Upload folder
 const uploadFolder = 'public/uploads';
 if (!fs.existsSync(uploadFolder)) {
   fs.mkdirSync(uploadFolder, { recursive: true });
 }
-
 app.use('/uploads', express.static('public/uploads'));
 
+// Middlewares
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin: "https://calviz.vercel.app",
+  credentials: true,
+}));
 
-// --- Add session middleware ---
+// Session (untuk passport)
 app.use(session({
   secret: process.env.SESSION_SECRET,
-  resave: false, 
-  saveUninitialized: true
+  resave: false,
+  saveUninitialized: true,
 }));
 app.use(passport.initialize());
 app.use(passport.session());
 
-
-app.use(cors({  origin: "https://calviz.vercel.app",
-                credentials: true
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-//Authorization Token
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.sendStatus(401);
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403); // Invalid token → Forbidden
-    req.user = user; // store decoded user info in request
-    next();
-  });
-}
-
-const port = process.env.PORT || 3000;
-
-/*--------------------
-      Middlewares
-----------------------*/
-const jwt = require('jsonwebtoken')
-
-// pool config
+// PostgreSQL pool
 const pool = new Pool({
   user: process.env.PGUSER,
   host: process.env.PGHOST,
@@ -68,49 +49,131 @@ const pool = new Pool({
   password: process.env.PGPASSWORD,
   port: process.env.PGPORT,
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
-// Multer config 
+// Multer storage
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'public/uploads'); // path folder penyimpanan
-  },
+  destination: (req, file, cb) => cb(null, 'public/uploads'),
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     const ext = file.originalname.split('.').pop();
-    cb(null, `${req.body.name}-${uniqueSuffix}.${ext}`); // nama file unik
-  }
+    cb(null, `${req.body.name}-${uniqueSuffix}.${ext}`);
+  },
 });
-
 const upload = multer({ storage });
 
-
-// Test DB connection
+// DB test
 pool.query('SELECT NOW()', (err, res) => {
   if (err) console.error('Database connection failed:', err);
   else console.log('PostgreSQL connected at', res.rows[0].now);
 });
 
+/*--------------------
+  AUTH TOKEN CHECK
+----------------------*/
+function authenticateToken(req, res, next) {
+  const token = req.cookies.token; // 🔥 ambil token dari cookie
+  if (!token) return res.status(401).json({ message: 'No token found' });
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ message: 'Invalid token' });
+    req.user = user;
+    next();
+  });
+}
 
 /*--------------------
-      Endpoints
+      ENDPOINTS
 ----------------------*/
-// Mengambil data profile user
+
+// PROFILE
 app.get('/profile', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT name, profile FROM users WHERE id=$1', [req.user.id]);
-    if (result.rows.length === 0) return res.status(404).json({ message: "User not found" });
-    res.json({ name: result.rows[0].name, profile_picture: result.rows[0].profile });
+    const result = await pool.query(
+      'SELECT name, profile FROM users WHERE id=$1',
+      [req.user.id]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: "User not found" });
+
+    res.json({
+      name: result.rows[0].name,
+      profile_picture: result.rows[0].profile || '/uploads/default.jpg'
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// passport untuk google Oauth
+/*--------------------
+   REGISTER
+----------------------*/
+app.post('/register', upload.single('profile'), async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    const profileFile = req.file;
+    const hashed = await bcrypt.hash(password, saltRounds);
+    const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
+
+    const query = `
+      INSERT INTO users(name, email, password, profile)
+      VALUES($1, $2, $3, $4)
+      RETURNING id
+    `;
+    const values = [name, email, hashed, profileUrl];
+    const result = await pool.query(query, values);
+
+    res.status(200).json({
+      status: 'success',
+      userId: result.rows[0].id,
+      imageUrl: profileUrl
+    });
+  } catch (err) {
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
+/*--------------------
+   LOGIN (manual)
+----------------------*/
+app.post('/login', upload.none(), async (req, res) => {
+  try {
+    const { name, password } = req.body;
+    const result = await pool.query('SELECT * FROM users WHERE name = $1', [name]);
+    if (result.rows.length === 0)
+      return res.status(404).json({ message: 'User not found' });
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ message: 'Incorrect password' });
+
+    const token = jwt.sign(
+      { id: user.id, name: user.name, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    // Set token via cookie
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 24 * 60 * 60 * 1000
+    });
+
+    res.json({ message: "Login successful" });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+/*--------------------
+  GOOGLE OAUTH
+----------------------*/
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -119,12 +182,10 @@ passport.use(new GoogleStrategy({
   try {
     const email = profile.emails[0].value;
     const name = profile.displayName;
-
-    // Check if user already exists
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+
     let user;
     if (result.rows.length === 0) {
-      // Insert new user (password null for OAuth users)
       const insert = await pool.query(
         'INSERT INTO users (name, email, password, profile) VALUES ($1, $2, $3, $4) RETURNING *',
         [name, email, null, null]
@@ -133,7 +194,6 @@ passport.use(new GoogleStrategy({
     } else {
       user = result.rows[0];
     }
-
     return done(null, user);
   } catch (err) {
     console.error('OAuth error:', err);
@@ -147,116 +207,41 @@ passport.deserializeUser(async (id, done) => {
   done(null, user.rows[0]);
 });
 
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-// Register endpoint
-app.post('/register', upload.single('profile'), async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-    const profileFile = req.file;
-
-    // Hash the password
-    const hashed = await bcrypt.hash(password, saltRounds);
-
-    const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
-
-    const query = `
-      INSERT INTO users(name, email, password, profile)
-      VALUES($1, $2, $3, $4)
-      RETURNING id
-    `;
-    const values = [name, email, hashed, profileUrl];
-
-    const result = await pool.query(query, values);
-
-    res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
-  } catch (err) {
-    console.error("REGISTER ERROR:", err);
-    res.status(500).json({ status: 'error', message: err.message });
-  }
-});
-
-
-// login endpoint
-app.post('/login', upload.none(), async (req, res) => {
-  try {
-    const {name, password} = req.body;
-
-    // select from Database
-    const query = `
-      select * from users
-      where name = $1
-    `;
-    const result = await pool.query(query, [name]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ status: 'error', message: 'User not found' });
-    }
-
-    // Compare passwords
-    const match = await bcrypt.compare(password, result.rows[0].password);
-    if (!match) {
-      return res.status(401).json({ status: 'error', message: 'Incorrect password' });
-    }
-    const token = jwt.sign(
-        { id: result.rows[0].id, name: result.rows[0].name, email: result.rows[0].email },
-        process.env.JWT_SECRET,
-        { expiresIn: '24h' } 
-    );
-    res.json({
-      status: 'success',
-      message: 'Login successful',
-      token, // Stored in Frontend
-    });
-  } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ status: 'error', message: 'Internal server error' });
-  }
-});
-
-app.get('/logged', authenticateToken, async (req, res) => {
-  // If token valid → req.user contains the decoded info
-  res.json({
-    message: 'You are logged in!',
-    user: req.user
-  });
-});
-
-// Google Oauth endpoint
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-);
-
-app.get('/auth/google/callback', passport.authenticate('google', {
-    failureRedirect: '/login-failed',
-    session: false, // we’re using JWT, not sessions
-  }),
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
   (req, res) => {
-    // Generate a JWT
     const token = jwt.sign(
-      {
-        id: req.user.id,
-        name: req.user.name,
-        email: req.user.email,
-      },
+      { id: req.user.id, name: req.user.name, email: req.user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '1d' }
     );
 
-    // Redirect user back to frontend with token
-    res.redirect(`https://calviz.vercel.app/?token=${token}`);
+    //  Set cookie for Google login too
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 24 * 60 * 60 * 1000
+    });
+
+    // Redirect user back to main page
+    res.redirect("https://calviz.vercel.app/index.html");
   }
 );
 
-
-
-app.get('/login-success', (req, res) => {
-  res.send('Google login successful!');
+/*--------------------
+   LOGOUT
+----------------------*/
+app.post('/logout', (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none"
+  });
+  res.json({ message: "Logged out" });
 });
 
-app.get('/login-failed', (req, res) => {
-  res.send('Google login failed');
-});
-
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server running on port ${port}`));
