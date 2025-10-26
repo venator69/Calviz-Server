@@ -50,11 +50,21 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     maxAge: 24*60*60*1000,
-    secure: true,       // HTTPS wajib
-    sameSite: 'none',   // cross-site
+    secure: true,
+    sameSite: 'none',
   },
-  proxy: true,          // penting untuk Railway/Vercel
+  proxy: true,
 }));
+
+/* --------------------------------
+   🔍 DEBUG MIDDLEWARE
+---------------------------------- */
+app.use((req, res, next) => {
+  console.log("🧩 Incoming request:", req.method, req.url);
+  console.log("🧩 Cookies:", req.headers.cookie);
+  console.log("🧩 Session before route:", req.session);
+  next();
+});
 
 /* --------------------------------
    📁 FILE UPLOAD SETUP
@@ -74,14 +84,21 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /* --------------------------------
-   👤 USER PROFILE
+   👤 AUTH HELPERS
 ---------------------------------- */
 function authenticateSession(req, res, next){
-  if(!req.session.user) return res.status(401).json({ message: 'Unauthorized' });
+  console.log("🧩 Checking session:", req.session);
+  if(!req.session.user) {
+    console.log("❌ No session found, returning 401");
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
   req.user = req.session.user;
   next();
 }
 
+/* --------------------------------
+   🔹 PROFILE
+---------------------------------- */
 app.get('/profile', authenticateSession, async (req, res) => {
   try{
     const result = await pool.query(
@@ -101,7 +118,7 @@ app.get('/profile', authenticateSession, async (req, res) => {
 });
 
 /* --------------------------------
-   REGISTER
+   🔹 REGISTER
 ---------------------------------- */
 app.post('/register', upload.single('profile'), async (req, res) => {
   try {
@@ -114,6 +131,8 @@ app.post('/register', upload.single('profile'), async (req, res) => {
       [name, email, hashed, profileUrl]
     );
 
+    console.log("🧩 New user registered:", result.rows[0].id);
+
     res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
   } catch(err){
     console.error("REGISTER ERROR:", err);
@@ -122,7 +141,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 });
 
 /* --------------------------------
-   LOGIN
+   🔹 LOGIN
 ---------------------------------- */
 app.post("/login", async (req, res) => {
   const { name, password } = req.body || {};
@@ -136,7 +155,9 @@ app.post("/login", async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if(!isMatch) return res.status(400).json({ message: "Password salah" });
 
-    req.session.user = { id: user.id, name: user.name }; // simpan session
+    req.session.user = { id: user.id, name: user.name };
+    console.log("🧩 Session after login:", req.session);
+
     res.status(200).json({ message: "Login sukses", user: { id: user.id, name: user.name } });
   } catch(err){
     console.error("❌ Login error:", err);
@@ -145,7 +166,7 @@ app.post("/login", async (req, res) => {
 });
 
 /* --------------------------------
-   GOOGLE OAUTH (Session-based)
+   🔹 GOOGLE OAUTH
 ---------------------------------- */
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
@@ -176,25 +197,34 @@ app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'em
 app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
   (req, res) => {
-    // simpan session
     req.session.user = { id: req.user.id, name: req.user.name, email: req.user.email };
+    console.log("🧩 Session after Google OAuth:", req.session);
     res.redirect('https://calviz.vercel.app/');
   }
 );
 
 /* --------------------------------
-   LOGOUT
+   🔹 LOGOUT
 ---------------------------------- */
 app.post('/logout', (req, res) => {
   req.session.destroy(err => {
     if(err) return res.status(500).json({ message: "Logout error" });
     res.clearCookie('connect.sid', { path: '/', secure: true, sameSite: 'none' });
+    console.log("🧩 Session destroyed and cookie cleared");
     res.json({ message: 'Logged out' });
   });
 });
 
 /* --------------------------------
-   START SERVER
+   🔹 DEBUG SESSION ENDPOINT
+---------------------------------- */
+app.get('/debug-session', (req, res) => {
+  console.log("🧩 Current session:", req.session);
+  res.json({ session: req.session });
+});
+
+/* --------------------------------
+   🚀 START SERVER
 ---------------------------------- */
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`✅ Server running on port ${port}`));
