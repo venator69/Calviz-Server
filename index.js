@@ -130,33 +130,31 @@ passport.deserializeUser(async (id, done) => {
 
 
 // Register endpoint
-async function submitform(name, password, email, file) {
-  const formData = new FormData();
-  formData.append('name', name);
-  formData.append('password', password);
-  formData.append('email', email);
-  formData.append('profile', file);
-
+app.post('/register', upload.single('profile'), async (req, res) => {
   try {
-    const response = await fetch('https://calviz-server-production.up.railway.app/register', {
-      method: "POST",
-      body: formData
-    });
+    const { name, email, password } = req.body;
+    const profileFile = req.file;
 
-    const data = await response.json(); // baca sekali saja
-    if (response.ok) {
-      console.log(data);
-      alert("Registered successfully");
-    } else {
-      console.error("Registration failed:", response.status, data);
-      alert(`Registration failed: ${data.message}`);
-    }
+    // Hash the password
+    const hashed = await bcrypt.hash(password, saltRounds);
 
-  } catch (e) {
-    console.error(e);
-    alert(`Registration failed: ${e}`);
+    const profileUrl = profileFile ? `/uploads/${profileFile.filename}` : null;
+
+    const query = `
+      INSERT INTO users(name, email, password, profile)
+      VALUES($1, $2, $3, $4)
+      RETURNING id
+    `;
+    const values = [name, email, hashed, profileUrl];
+
+    const result = await pool.query(query, values);
+
+    res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
+  } catch (err) {
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ status: 'error', message: err.message });
   }
-}
+});
 
 
 // login endpoint
