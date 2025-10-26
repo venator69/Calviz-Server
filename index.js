@@ -8,14 +8,23 @@ const { Pool } = require('pg');
 const dotenv = require('dotenv');
 dotenv.config({ path: './.env' });
 
-const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const jwt = require('jsonwebtoken');
 
 const saltRounds = 10;
 const app = express();
+
+// Middleware
 app.set('trust proxy', 1);
+app.use(cors({
+  origin: "https://calviz.vercel.app",
+  credentials: true,
+}));
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 
 // Upload folder
 const uploadFolder = 'public/uploads';
@@ -24,21 +33,10 @@ if (!fs.existsSync(uploadFolder)) {
 }
 app.use('/uploads', express.static('public/uploads'));
 
-// Middlewares
-app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cors({
-  origin: "https://calviz.vercel.app",
-  credentials: true,
-}));
 
-// Session (untuk passport)
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: true,
-}));
+
+
+
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -229,7 +227,6 @@ app.get('/auth/google/callback',
       sameSite: 'None',
       maxAge: 24 * 60 * 60 * 1000,
       path: '/',
-      domain: '.railway.app', // ⬅️ tambahkan ini
     });
 
     res.json({ message: "Login successful" });
