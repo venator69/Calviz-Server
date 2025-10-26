@@ -128,43 +128,49 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 /* --------------------------------
     LOGIN
 ---------------------------------- */
-// ✅ Login endpoint
 app.post("/login", async (req, res) => {
-  const { name, password } = req.body;
+  // Pastikan req.body ada
+  const { name, password } = req.body || {};
+
+  // Cek jika name atau password kosong
+  if (!name || !password) {
+    return res.status(400).json({ message: "Name dan password wajib diisi" });
+  }
 
   try {
-    const result = await pool.query("SELECT * FROM users WHERE email = $1", [name]);
+    // Cari user berdasarkan name (bukan email)
+    const result = await pool.query("SELECT * FROM users WHERE name = $1", [name]);
     if (result.rows.length === 0) {
-      return res.status(400).json({ message: "User not found" });
+      return res.status(400).json({ message: "User tidak ditemukan" });
     }
 
     const user = result.rows[0];
+
+    // Cek password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid password" });
+      return res.status(400).json({ message: "Password salah" });
     }
 
-    // ✅ Generate JWT
+    // Generate JWT
     const token = jwt.sign(
-      { id: user.id, name: user.name, email: user.email },
+      { id: user.id, name: user.name },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
-    // ✅ Kirim cookie agar bisa diakses frontend (bukan HttpOnly)
+    // Kirim cookie ke frontend
     res.cookie("token", token, {
-      httpOnly: false,       // ❌ false supaya frontend bisa baca
-      secure: true,          // ✅ wajib true untuk HTTPS (Vercel + Railway)
-      sameSite: "None",      // ✅ penting agar cross-site bisa jalan
-      path: "/",             // ✅ cookie berlaku untuk seluruh domain
+      httpOnly: false,
+      secure: true,
+      sameSite: "None",
+      path: "/",
       maxAge: 24 * 60 * 60 * 1000, // 1 hari
     });
 
-    console.log("🍪 Cookie sent:", token);
-
     res.status(200).json({
-      message: "Login success",
-      user: { id: user.id, name: user.name, email: user.email },
+      message: "Login sukses",
+      user: { id: user.id, name: user.name },
       token,
     });
 
@@ -173,6 +179,7 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 /* --------------------------------
      GOOGLE OAUTH
