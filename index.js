@@ -98,7 +98,7 @@ app.get('/profile', authenticateToken, async (req, res) => {
 });
 
 /* --------------------------------
-   📝 REGISTER
+  REGISTER
 ---------------------------------- */
 app.post('/register', upload.single('profile'), async (req, res) => {
   try {
@@ -123,7 +123,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 });
 
 /* --------------------------------
-   🔑 LOGIN
+    LOGIN
 ---------------------------------- */
 app.post('/login', upload.none(), async (req, res) => {
   const { name, password } = req.body;
@@ -158,7 +158,7 @@ app.post('/login', upload.none(), async (req, res) => {
 });
 
 /* --------------------------------
-   🌐 GOOGLE OAUTH
+     GOOGLE OAUTH
 ---------------------------------- */
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
