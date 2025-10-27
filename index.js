@@ -180,40 +180,44 @@ app.post("/login", async (req, res) => {
 /* --------------------------------
    🔹 GOOGLE OAUTH
 ---------------------------------- */
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: "https://calviz-server-production.up.railway.app/auth/google/callback",
-}, async (accessToken, refreshToken, profile, done) => {
-  try {
-    const email = profile.emails[0].value;
-    const name = profile.displayName;
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    passport.use(new GoogleStrategy({
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: "https://calviz-server-production.up.railway.app/auth/google/callback",
+    }, async (accessToken, refreshToken, profile, done) => {
+        try {
+            const email = profile.emails[0].value;
+            const name = profile.displayName;
 
-    let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
-    if(!user){
-      const insert = await pool.query(
-        'INSERT INTO users (name, email, password, profile) VALUES ($1, $2, $3, $4) RETURNING *',
-        [name, email, null, null]
-      );
-      user = insert.rows[0];
-    }
-    return done(null, user);
-  } catch(err){
-    console.error('OAuth error:', err);
-    done(err, null);
-  }
-}));
+            let user = (await pool.query('SELECT * FROM users WHERE email=$1', [email])).rows[0];
+            if(!user){
+                const insert = await pool.query(
+                    'INSERT INTO users (name, email, password, profile) VALUES ($1, $2, $3, $4) RETURNING *',
+                    [name, email, null, null]
+                );
+                user = insert.rows[0];
+            }
+            return done(null, user);
+        } catch(err){
+            console.error('OAuth error:', err);
+            done(err, null);
+        }
+    }));
 
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+    app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
-  (req, res) => {
-    req.session.user = { id: req.user.id, name: req.user.name, email: req.user.email };
-    console.log("🧩 Session after Google OAuth:", req.session);
-    res.redirect('https://calviz.vercel.app/');
-  }
-);
+    app.get('/auth/google/callback',
+        passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
+        (req, res) => {
+            req.session.user = { id: req.user.id, name: req.user.name, email: req.user.email };
+            console.log("🧩 Session after Google OAuth:", req.session);
+            res.redirect('https://calviz.vercel.app/');
+        }
+    );
+} else {
+    console.warn('⚠️ Google OAuth disabled: Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in .env');
+}
 
 /* --------------------------------
    🔹 LOGOUT
