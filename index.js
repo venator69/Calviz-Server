@@ -15,7 +15,7 @@ const saltRounds = 10;
 const app = express();
 
 /* --------------------------------
-   🔧 BASIC SERVER SETUP
+         SERVER SETUP
 ---------------------------------- */
 app.set('trust proxy', 1);
 app.use(express.json());
@@ -41,7 +41,7 @@ app.use(cors({
 }));
 
 /* --------------------------------
-   🗄️ DATABASE CONNECTION
+        DATABASE CONNECTION
 ---------------------------------- */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -49,12 +49,12 @@ const pool = new Pool({
 });
 
 pool.query('SELECT NOW()', (err, res) => {
-  if (err) console.error('❌ Database connection failed:', err);
-  else console.log('✅ PostgreSQL connected at', res.rows[0].now);
+  if (err) console.error('Database connection failed:', err);
+  else console.log('PostgreSQL connected at', res.rows[0].now);
 });
 
 /* --------------------------------
-   🔐 SESSION SETUP
+        SESSION SETUP
 ---------------------------------- */
 app.use(session({
   store: new PgSession({ pool: pool, tableName: 'session' }),
@@ -71,16 +71,16 @@ app.use(session({
 }));
 
 /* --------------------------------
-   🔍 DEBUG MIDDLEWARE
+        DEBUG MIDDLEWARE
 ---------------------------------- */
 app.use((req, res, next) => {
-  console.log("🧩 Incoming request:", req.method, req.url);
-  console.log("🧩 Session before route:", req.session);
+  console.log("Incoming request:", req.method, req.url);
+  console.log("Session before route:", req.session);
   next();
 });
 
 /* --------------------------------
-   📁 FILE UPLOAD SETUP
+    FILE UPLOAD SETUP
 ---------------------------------- */
 const uploadFolder = 'public/uploads';
 if (!fs.existsSync(uploadFolder)) fs.mkdirSync(uploadFolder, { recursive: true });
@@ -97,11 +97,11 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /* --------------------------------
-   👤 AUTH HELPERS
+    AUTH HELPERS
 ---------------------------------- */
 function authenticateSession(req, res, next){
   if(!req.session.user) {
-    console.log("❌ No session found, returning 401");
+    console.log("No session found, returning 401");
     return res.status(401).json({ message: 'Unauthorized' });
   }
   req.user = req.session.user;
@@ -109,7 +109,7 @@ function authenticateSession(req, res, next){
 }
 
 /* --------------------------------
-   🔹 PROFILE
+    PROFILE
 ---------------------------------- */
 app.get('/profile', authenticateSession, async (req, res) => {
   try{
@@ -130,7 +130,7 @@ app.get('/profile', authenticateSession, async (req, res) => {
 });
 
 /* --------------------------------
-   🔹 REGISTER
+        REGISTER
 ---------------------------------- */
 app.post('/register', upload.single('profile'), async (req, res) => {
   try {
@@ -143,7 +143,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
       [name, email, hashed, profileUrl]
     );
 
-    console.log("🧩 New user registered:", result.rows[0].id);
+    console.log("New user registered:", result.rows[0].id);
 
     res.status(200).json({ status: 'success', userId: result.rows[0].id, imageUrl: profileUrl });
   } catch(err){
@@ -153,7 +153,7 @@ app.post('/register', upload.single('profile'), async (req, res) => {
 });
 
 /* --------------------------------
-   🔹 LOGIN
+    LOGIN
 ---------------------------------- */
 app.post("/login", async (req, res) => {
   const { name, password } = req.body || {};
@@ -168,11 +168,11 @@ app.post("/login", async (req, res) => {
     if(!isMatch) return res.status(400).json({ message: "Password salah" });
 
     req.session.user = { id: user.id, name: user.name };
-    console.log("🧩 Session after login:", req.session);
+    console.log("Session after login:", req.session);
 
     res.status(200).json({ message: "Login sukses", user: { id: user.id, name: user.name } });
   } catch(err){
-    console.error("❌ Login error:", err);
+    console.error("Login error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -211,23 +211,23 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
         passport.authenticate('google', { failureRedirect: '/login-failed', session: false }),
         (req, res) => {
             req.session.user = { id: req.user.id, name: req.user.name, email: req.user.email };
-            console.log("🧩 Session after Google OAuth:", req.session);
+            console.log("Session after Google OAuth:", req.session);
             res.redirect('https://calviz.vercel.app/');
         }
     );
 } else {
-    console.warn('⚠️ Google OAuth disabled: Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in .env');
+    console.warn('Google OAuth disabled: Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in .env');
 }
 
 /* --------------------------------
-   🔹 LOGOUT
+        LOGOUT
 ---------------------------------- */
 app.post('/logout', (req, res) => {
   const cookieName = 'connect.sid'; 
   
   req.session.destroy(err => {
     if(err) {
-      console.error("❌ Session destroy error:", err);
+      console.error("Session destroy error:", err);
       return res.status(500).json({ message: "Logout error" });
     }
     
@@ -237,14 +237,14 @@ app.post('/logout', (req, res) => {
       sameSite: 'none',
     });
     
-    console.log("🧩 Session destroyed and cookie cleared");
+    console.log("Session destroyed and cookie cleared");
     res.json({ message: 'Logged out' });
   });
 });
 
 
 /* --------------------------------
-   🔹 PROGRESS ENDPOINTS (LABWORKS)
+        PROGRESS ENDPOINTS (LABWORKS)
 ---------------------------------- */
 const PROGRESS_API_BASE = '/api/progress';
 
@@ -281,7 +281,7 @@ app.post(`${PROGRESS_API_BASE}/save`, isAuthenticated, async (req, res) => {
 
         res.status(200).json({ success: true, message: `Status module ${moduleId} updated to ${status} in labworks table.` });
     } catch (err) {
-        console.error("❌ PROGRESS SAVE ERROR:", err);
+        console.error("PROGRESS SAVE ERROR:", err);
         res.status(500).json({ message: "Failed to save progress to server." });
     }
 });
@@ -308,13 +308,13 @@ app.get(`${PROGRESS_API_BASE}/get`, isAuthenticated, async (req, res) => {
 
         res.status(200).json({ progress: progressMap });
     } catch (err) {
-        console.error("❌ PROGRESS GET ERROR:", err);
+        console.error("PROGRESS GET ERROR:", err);
         res.status(500).json({ message: "Failed to retrieve progress from server." });
     }
 });
 
 /* --------------------------------
-   🚀 START SERVER
+        START SERVER
 ---------------------------------- */
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`✅ Server running on port ${port}`));
+app.listen(port, () => console.log(`Server running on port ${port}`));
