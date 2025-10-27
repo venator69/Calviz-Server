@@ -21,10 +21,23 @@ app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ CORS setup
+const allowedOrigins = [
+  "https://calviz.vercel.app", 
+  "null", 
+  "http://localhost:3000",
+  "http://localhost:8080", 
+];
+
 app.use(cors({
-  origin: ["https://calviz.vercel.app"],
-  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Not allowed by CORS for origin: ${origin}`), false);
+    }
+  },
+  credentials: true,
 }));
 
 /* --------------------------------
@@ -52,6 +65,7 @@ app.use(session({
     maxAge: 24*60*60*1000,
     secure: true,
     sameSite: 'none',
+    httpOnly: true,
   },
   proxy: true,
 }));
@@ -61,7 +75,6 @@ app.use(session({
 ---------------------------------- */
 app.use((req, res, next) => {
   console.log("🧩 Incoming request:", req.method, req.url);
-  console.log("🧩 Cookies:", req.headers.cookie);
   console.log("🧩 Session before route:", req.session);
   next();
 });
@@ -87,12 +100,11 @@ const upload = multer({ storage });
    👤 AUTH HELPERS
 ---------------------------------- */
 function authenticateSession(req, res, next){
-  console.log("🧩 Checking session:", req.session);
-  if(!req.session.user || !req.session.user.id) {
-    console.log("❌ No session found or invalid user object, returning 401");
+  if(!req.session.user) {
+    console.log("❌ No session found, returning 401");
     return res.status(401).json({ message: 'Unauthorized' });
   }
-  req.user = req.session.user; 
+  req.user = req.session.user;
   next();
 }
 
@@ -125,11 +137,6 @@ app.post('/register', upload.single('profile'), async (req, res) => {
     const { name, email, password } = req.body;
     const hashed = await bcrypt.hash(password, saltRounds);
     const profileUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
-    const checkUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (checkUser.rows.length > 0) {
-      return res.status(409).json({ status: 'error', message: 'Email already registered' });
-    }
 
     const result = await pool.query(
       'INSERT INTO users(name, email, password, profile) VALUES ($1, $2, $3, $4) RETURNING id',
@@ -209,36 +216,49 @@ app.get('/auth/google/callback',
 );
 
 /* --------------------------------
-   🔹 LOGOUT 
+   🔹 LOGOUT
 ---------------------------------- */
 app.post('/logout', (req, res) => {
-  req.session.destroy(err => {
-    if(err) return res.status(500).json({ message: "Logout error" });
-    
-    res.clearCookie('connect.sid', { 
-        path: '/', 
-        secure: true, 
-        sameSite: 'none' 
-    }); 
+  const cookieName = 'connect.sid'; 
+  
+  req.session.destroy(err => {
+    if(err) {
+      console.error("❌ Session destroy error:", err);
+      return res.status(500).json({ message: "Logout error" });
+    }
     
-    console.log("🧩 Session destroyed and cookie cleared");
-    res.json({ message: 'Logged out' });
-  });
+    res.clearCookie(cookieName, { 
+      path: '/', 
+      secure: true, 
+      sameSite: 'none',
+    });
+    
+    console.log("🧩 Session destroyed and cookie cleared");
+    res.json({ message: 'Logged out' });
+  });
 });
 
 
 /* --------------------------------
-   ✅ PROGRESS: SAVE MODULE STATUS 
+   🔹 PROGRESS ENDPOINTS (LABWORKS)
 ---------------------------------- */
-app.post('/api/progress/save', authenticateSession, async (req, res) => {
+const PROGRESS_API_BASE = '/api/progress';
+
+function isAuthenticated(req, res, next){
+  if(!req.session.user) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+  req.user = req.session.user;
+  next();
+}
+
+app.post(`${PROGRESS_API_BASE}/save`, isAuthenticated, async (req, res) => {
     const userId = req.user.id; 
-    const { moduleId, status } = req.body; 
-
+    const { moduleId, status } = req.body;
+    
     const columnName = `${moduleId}_check`;
-    const validColumns = ['riemann_check', 'derivative_check', 'series_check'];
-
-    if (!validColumns.includes(columnName) || typeof status !== 'boolean') {
-        return res.status(400).json({ message: 'Invalid module ID or status.' });
+    if (!['riemann_check', 'derivative_check', 'series_check'].includes(columnName)) {
+        return res.status(400).json({ message: 'Invalid module ID.' });
     }
     
     try {
@@ -255,17 +275,14 @@ app.post('/api/progress/save', authenticateSession, async (req, res) => {
             await pool.query(insertQuery, [userId, status]);
         }
 
-        res.status(200).json({ success: true, message: `Status module ${moduleId} updated to ${status}` });
+        res.status(200).json({ success: true, message: `Status module ${moduleId} updated to ${status} in labworks table.` });
     } catch (err) {
         console.error("❌ PROGRESS SAVE ERROR:", err);
         res.status(500).json({ message: "Failed to save progress to server." });
     }
 });
 
-/* --------------------------------
-   ✅ PROGRESS: GET MODULE STATUS 
----------------------------------- */
-app.get('/api/progress/get', authenticateSession, async (req, res) => {
+app.get(`${PROGRESS_API_BASE}/get`, isAuthenticated, async (req, res) => {
     const userId = req.user.id;
 
     try {
@@ -290,15 +307,6 @@ app.get('/api/progress/get', authenticateSession, async (req, res) => {
         console.error("❌ PROGRESS GET ERROR:", err);
         res.status(500).json({ message: "Failed to retrieve progress from server." });
     }
-});
-
-
-/* --------------------------------
-   🔹 DEBUG SESSION ENDPOINT
----------------------------------- */
-app.get('/debug-session', (req, res) => {
-  console.log("🧩 Current session:", req.session);
-  res.json({ session: req.session });
 });
 
 /* --------------------------------
